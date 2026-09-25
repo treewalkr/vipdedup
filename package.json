@@ -1,0 +1,20 @@
+{
+  "name": "vipdedup",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n api,web -c blue,green \"bun run --filter @vd/api dev\" \"bun run --filter @vd/web dev\"",
+    "dev:api": "bun run --filter @vd/api dev",
+    "dev:web": "bun run --filter @vd/web dev",
+    "build": "bun run --filter '@vd/web build'",
+    "test": "bun run --filter @vd/shared test && bun run --filter @vd/api test",
+    "check": "bun run --filter @vd/web check"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "typescript": "^5.8.3"
+  }
+}

@@ -1,0 +1,27 @@
+# deps
+node_modules/
+
+# builds
+dist/
+.svelte-kit/
+build/
+*.tsbuildinfo
+
+# env
+.env
+.env.*
+!.env.example
+
+# app data
+*.db
+*.db-*
+
+# misc
+.DS_Store
+*.log
+.vite/
+
+.zcode/
+
+# local
+COMMITS.md
