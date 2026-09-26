@@ -1,0 +1,24 @@
+{
+  "name": "@vd/api",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run --watch src/index.ts",
+    "start": "bun run src/index.ts",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@elysiajs/cors": "^1.4.1",
+    "@elysiajs/openapi": "^1.4.16",
+    "@vd/shared": "workspace:*",
+    "drizzle-orm": "0.44.7",
+    "elysia": "^1.4.2",
+    "zod": "^4.1.5"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.1.0"
+  },
+  "exports": {
+    ".": "./src/app.ts"
+  }
+}
