@@ -5,7 +5,7 @@ import { eq } from "drizzle-orm";
 import * as schema from "./schema";
 import { SOURCES } from "../config";
 
-/** Repo-root-relative default so the API and scan workers always agree. */
+/** Resolves to apps/vipdedup.db by default; override with VIPDEDUP_DB. */
 export function getDbPath(): string {
   return process.env.VIPDEDUP_DB ?? path.resolve(import.meta.dir, "../../../vipdedup.db");
 }
@@ -91,11 +91,15 @@ export function seedSources({ db }: DbHandle, list: { label: string; path: strin
 
 let handle: DbHandle | undefined;
 
-/** Process-wide singleton. Tests point VIPDEDUP_DB at a temp file before first use. */
+/**
+ * Process-wide singleton. Tests point VIPDEDUP_DB at a temp file before first
+ * use. Seeding happens on first boot only: once any source exists the table
+ * is the single source of truth, so sources removed in the UI stay removed.
+ */
 export function getDb(): DbHandle {
   if (!handle) {
     handle = openDb(getDbPath());
-    seedSources(handle);
+    if (handle.db.select().from(schema.sources).limit(1).all().length === 0) seedSources(handle);
   }
   return handle;
 }
