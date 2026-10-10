@@ -162,6 +162,12 @@ export const GroupTrashRequest = z.object({
 });
 export type GroupTrashRequest = z.infer<typeof GroupTrashRequest>;
 
+export const AddSourceRequest = z.object({
+  label: z.string().min(1),
+  path: z.string().min(1),
+});
+export type AddSourceRequest = z.infer<typeof AddSourceRequest>;
+
 export const RevealRequest = z.object({
   sourceId: z.number().int(),
   relPath: z.string().min(1),

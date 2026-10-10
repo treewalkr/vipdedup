@@ -1,15 +1,85 @@
 import { Elysia, t } from "elysia";
+import { eq } from "drizzle-orm";
 import { isSafeRelPath, normSeg } from "@vd/shared";
 import { buildSourceStatuses } from "../lib/status";
-import { startScan } from "../scanner/manager";
+import { startScan, isScanning, checkOnline } from "../scanner/manager";
+import { getDb } from "../db";
+import { files, scanRuns, sources } from "../db/schema";
 import { loadFileRows, type FileRow } from "../lib/groups";
 import type { FileEntryDto, FolderEntryDto } from "@vd/shared";
+
+/** `a` equal/inside/containing `b`, with trailing slashes normalized away. */
+const overlaps = (a: string, b: string) => {
+  const da = a.endsWith("/") ? a : `${a}/`;
+  const db = b.endsWith("/") ? b : `${b}/`;
+  return da.startsWith(db) || db.startsWith(da);
+};
 
 export const sourceRoutes = new Elysia({ prefix: "/v1/sources", tags: ["sources"] })
   .get(
     "/",
     async () => ({ sources: await buildSourceStatuses() }),
     { detail: { summary: "List sources with availability and last scan" } },
+  )
+  .post(
+    "/",
+    async ({ body, status }) => {
+      const p = body.path.trim();
+      if (!p.startsWith("/")) return status(400, { error: "path must be absolute" });
+
+      const { db } = getDb();
+      const existing = db.select().from(sources).all();
+      if (existing.some((s) => s.path === p))
+        return status(409, { error: "a source with this path already exists" });
+      const clash = existing.find((s) => overlaps(p, s.path));
+      if (clash) return status(409, { error: `path overlaps existing source «${clash.label}»` });
+
+      // stat() in a throwaway subprocess: a wedged FUSE mount must never hang this route
+      const online = await checkOnline([{ id: -1, path: p }]);
+      if (!online.get(-1))
+        return status(400, { error: "path is not an accessible directory — mount the drive and try again" });
+
+      const row = db
+        .insert(sources)
+        .values({ label: body.label, path: p, createdAt: new Date().toISOString() })
+        .returning()
+        .get();
+      return { source: { id: row.id, label: row.label, path: row.path, createdAt: row.createdAt } };
+    },
+    {
+      body: t.Object({
+        label: t.String({ minLength: 1, maxLength: 100 }),
+        path: t.String({ minLength: 1 }),
+      }),
+      detail: { summary: "Add a source location (validated: absolute, accessible, non-overlapping)" },
+    },
+  )
+  .delete(
+    "/:id",
+    ({ params, status }) => {
+      const { db, sqlite } = getDb();
+      const row = db.select().from(sources).where(eq(sources.id, params.id)).get();
+      if (!row) return status(404, { error: "unknown source" });
+      if (isScanning(params.id)) return status(409, { error: "scan in progress for this source" });
+
+      const { n } = sqlite
+        .prepare("SELECT COUNT(*) AS n FROM trash_items WHERE source_id = ?")
+        .get(params.id) as { n: number };
+      if (n > 0)
+        return status(409, {
+          error: `source still has ${n} staged trash item(s) — restore or purge them on the Trash page first`,
+        });
+
+      // manual cascade (FKs aren't enforced) — metadata only, nothing on disk is touched
+      db.delete(files).where(eq(files.sourceId, params.id)).run();
+      db.delete(scanRuns).where(eq(scanRuns.sourceId, params.id)).run();
+      db.delete(sources).where(eq(sources.id, params.id)).run();
+      return { deleted: true, id: params.id };
+    },
+    {
+      params: t.Object({ id: t.Number() }),
+      detail: { summary: "Remove a source and its metadata (refused while staged trash exists)" },
+    },
   )
   .post(
     "/:id/scan",
