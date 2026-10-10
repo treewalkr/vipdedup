@@ -3,6 +3,7 @@ import type {
   FileEntryDto,
   FolderEntryDto,
   OverviewDto,
+  SourceDto,
   SourceStatusDto,
   TrashItemDto,
 } from '@vd/shared';
@@ -41,6 +42,12 @@ export const api = {
   scan: (id: number) =>
     unwrap<{ started: boolean; sourceId: number }>(client.v1.sources({ id }).scan.post()),
 
+  addSource: (label: string, path: string) =>
+    unwrap<{ source: SourceDto }>(client.v1.sources.post({ label, path })),
+
+  removeSource: (id: number) =>
+    unwrap<{ deleted: boolean }>(client.v1.sources({ id }).delete()),
+
   scanAll: () =>
     unwrap<{ started: number[]; skipped: number[] }>(client.v1['scan-all'].post()),
 
@@ -78,4 +85,4 @@ export const api = {
     unwrap<{ ok: boolean }>(client.v1.reveal.post({ sourceId, relPath })),
 };
 
-export type { SourceStatusDto };
+export type { SourceDto, SourceStatusDto };
