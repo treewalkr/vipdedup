@@ -18,8 +18,10 @@ bun run dev
 # Web  → http://localhost:5174
 ```
 
-The three source folders are seeded from `apps/api/src/config.ts` on first boot.
-The SQLite DB lives at `vipdedup.db` (repo root) — override with `VIPDEDUP_DB`.
+Sources are managed on the **Sources** page (Add location / Remove). The entries in
+`apps/api/src/config.ts` seed the table on first boot only; after that the DB is the
+single source of truth. The SQLite DB lives at `apps/vipdedup.db` — override with
+`VIPDEDUP_DB`.
 
 ## How it works
 
@@ -51,6 +53,11 @@ The SQLite DB lives at `vipdedup.db` (repo root) — override with `VIPDEDUP_DB`
 - Folder-level "keep" only trashes copies whose content is verified equal (hash when
   both hashed, else size) to the kept source's copy.
 - Reveal-in-Finder paths are validated against the source root.
+- Removing a source deletes **only vipdedup's metadata** (its file rows and scan runs) —
+  nothing on disk — and is refused while the source has staged trash items or a scan
+  in flight. Adding a source validates the path (absolute, accessible, non-overlapping
+  with existing sources) in a watchdogged subprocess so a wedged mount can't hang the
+  API.
 - The SQLite DB lives at `apps/vipdedup.db` (override with `VIPDEDUP_DB`).
 
 ## Tests
