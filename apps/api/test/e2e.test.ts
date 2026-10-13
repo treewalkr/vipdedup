@@ -9,6 +9,7 @@ import { runScan } from "../src/scanner/scan";
 import type { AnyGroupDto, OverviewDto } from "@vd/shared";
 
 let root: string;
+let deltaId: number;
 
 async function getJson(p: string) {
   const res = await app.handle(new Request(`http://localhost${p}`));
@@ -23,6 +24,11 @@ async function postJson(p: string, body: unknown) {
       body: JSON.stringify(body),
     }),
   );
+  return { status: res.status, body: (await res.json()) as any };
+}
+
+async function deleteJson(p: string) {
+  const res = await app.handle(new Request(`http://localhost${p}`, { method: "DELETE" }));
   return { status: res.status, body: (await res.json()) as any };
 }
 
@@ -175,4 +181,73 @@ test("hash-group keep stages the relocated copy; purge removes it for good", asy
 
 test("scan of a missing source errors instead of hanging", async () => {
   await expect(runScan(99)).rejects.toThrow("unknown source");
+});
+
+test("add source validates the path before inserting", async () => {
+  const D = path.join(root, "srcD");
+  mkdirSync(path.join(D, "ubuzama"), { recursive: true });
+  writeFileSync(path.join(D, "ubuzama", "one.mp4"), "content-one");
+  writeFileSync(path.join(D, "only-delta.txt"), "delta");
+
+  const rel = await postJson("/v1/sources", { label: "Rel", path: "some/rel/path" });
+  expect(rel.status).toBe(400);
+  const missing = await postJson("/v1/sources", { label: "Missing", path: path.join(root, "nope") });
+  expect(missing.status).toBe(400);
+  const dup = await postJson("/v1/sources", { label: "Alpha again", path: path.join(root, "srcA") });
+  expect(dup.status).toBe(409);
+  const nested = await postJson("/v1/sources", { label: "Nested", path: path.join(root, "srcA", "ubuzama") });
+  expect(nested.status).toBe(409);
+  const parent = await postJson("/v1/sources", { label: "Root", path: root });
+  expect(parent.status).toBe(409);
+
+  const { status, body } = await postJson("/v1/sources", { label: "Delta", path: D });
+  expect(status).toBe(200);
+  expect(body.source.label).toBe("Delta");
+  expect(body.source.path).toBe(D);
+  deltaId = body.source.id;
+
+  const { body: list } = await getJson("/v1/sources");
+  expect(list.sources.map((s: any) => s.source.label)).toContain("Delta");
+});
+
+test("remove source drops its metadata everywhere, disk untouched", async () => {
+  expect((await runScan(deltaId)).status).toBe("ok");
+
+  const { body: before } = await getJson(`/v1/sources/${deltaId}/files`);
+  expect(before.folders.map((f: any) => f.name)).toEqual(["ubuzama"]);
+
+  const { body: groupsBefore } = await getJson("/v1/groups?type=file");
+  const oneBefore = (groupsBefore.groups as AnyGroupDto[]).find((g) => g.key === "path:ubuzama/one.mp4")!;
+  expect(oneBefore.sources.map((s) => s.sourceId)).toContain(deltaId);
+
+  const { status, body } = await deleteJson(`/v1/sources/${deltaId}`);
+  expect(status).toBe(200);
+  expect(body.deleted).toBe(true);
+  expect(await deleteJson(`/v1/sources/${deltaId}`)).toMatchObject({ status: 404 });
+
+  const { body: after } = await getJson(`/v1/sources/${deltaId}/files`);
+  expect(after.folders).toHaveLength(0);
+  expect(after.files).toHaveLength(0);
+  const { body: groupsAfter } = await getJson("/v1/groups?type=file");
+  const oneAfter = (groupsAfter.groups as AnyGroupDto[]).find((g) => g.key === "path:ubuzama/one.mp4")!;
+  expect(oneAfter.sources.map((s) => s.sourceId)).not.toContain(deltaId);
+
+  // metadata only — the drive's files are untouched, and rescans refuse the id
+  expect(existsSync(path.join(root, "srcD", "ubuzama", "one.mp4"))).toBe(true);
+  await expect(runScan(deltaId)).rejects.toThrow("unknown source");
+});
+
+test("remove source is refused while staged trash exists", async () => {
+  const { status } = await postJson("/v1/groups/trash", { key: "folder:ubuzama", keepSourceId: 1 });
+  expect(status).toBe(200);
+
+  const { status: del, body } = await deleteJson("/v1/sources/2");
+  expect(del).toBe(409);
+  expect(body.error).toMatch(/staged trash/);
+
+  const { body: trashList } = await getJson("/v1/trash");
+  expect(trashList.items).toHaveLength(1);
+  expect(trashList.items[0].sourceLabel).toBe("Beta");
+
+  await postJson(`/v1/trash/${trashList.items[0].id}/restore`, {});
 });
